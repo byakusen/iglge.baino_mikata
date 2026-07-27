@@ -56,6 +56,9 @@
   }
   .tab small{display:block;font-size:clamp(9px,1.2vh,11px);font-weight:500;opacity:.75}
   .tab[aria-selected="true"]{background:var(--mode);border-color:var(--mode);color:#fff}
+  /* ランダムだけ、えらんでいないときは薄い黄色で目立たせる */
+  .tab[data-mode="random"]{background:#FBEFA8;border-color:#E2C851;color:#6B5410}
+  .tab[data-mode="random"][aria-selected="true"]{background:var(--mode);border-color:var(--mode);color:#fff}
   .tab:focus-visible{outline:3px solid #F2B441;outline-offset:2px}
 
   /* ---------- layout ---------- */
@@ -309,7 +312,7 @@ const MODES = {
   times:   { name:'何倍',      color:'#2E6FB7' },
   compare: { name:'比べる数',  color:'#128C7E' },
   base:    { name:'元にする数', color:'#C2681A' },
-  random:  { name:'ランダム',  color:'#7A4FBF' },
+  random:  { name:'ランダム',  color:'#2E6FB7' },
   versus:  { name:'くらべる',  color:'#B0397A' }
 };
 
