@@ -75,6 +75,7 @@
   #question .ask{background:linear-gradient(transparent 62%, #FFE49A 62%)}
   #figure{flex:1;min-height:0;margin-top:4px}
   #figure svg{width:100%;height:100%;display:block}
+  #figure .hit{cursor:pointer}
   .figopt{flex:none;display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;
           font-size:clamp(12px,1.9vh,17px);font-weight:700;color:var(--ink-soft);
           background:#F5F8FB;border:2px solid var(--rule);border-radius:999px;padding:4px 14px}
@@ -238,7 +239,7 @@
       <div class="captop">
         <span class="cap" id="cap">もんだい</span>
         <div class="figopts" id="figopts">
-          <label class="figopt" id="figopt"><input type="checkbox" id="hideticks">図のめもりをかくす</label>
+          <label class="figopt" id="figopt"><input type="checkbox" id="hidefig">図の表示をかくす</label>
           <label class="figopt" id="boxopt"><input type="checkbox" id="usebox">□をつかった式</label>
         </div>
       </div>
@@ -372,6 +373,7 @@ let okCount = 0, allCount = 0;
 /* □をつかった式モード（何倍・元にする数のもんだいだけ。ランダムの中でも切りかわる） */
 let useBox  = false;
 let boxStep = 1;              // ① □の式をつくる  ② □をわり算でもとめる
+let revealed = new Set();     // 「図の表示をかくす」で、クリックして出した部品
 function boxTabOK(){
   const m = (tab === 'random') ? (Q && Q.mode) : tab;
   return m === 'times' || m === 'base';
@@ -411,6 +413,7 @@ function makeQuestion(){
   Q = { mode, ctx, n, base, comp, text, expect };
   solved = false;
   boxStep = 1;
+  revealed.clear();
   tokens = [];
   render();
 }
@@ -424,29 +427,59 @@ function wrap(s, max){
   return out;
 }
 function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+/* 文字のおおよその幅（全角＝1、半角＝0.6） */
+function tw(s){ return [...s].reduce((a,c)=> a + (c.charCodeAt(0) > 255 ? 1 : 0.6), 0); }
+
+function hideOn(){ return document.getElementById('hidefig').checked; }
+
+/* かくせる部品。かくしているときは青い□。クリックで出し入れする
+   size を渡すと、その大きさにそろえる（中身が推測できないように） */
+function hid(key, part, size){
+  if (!hideOn()) return part.svg;
+  const b = part.box;
+  const w = Math.max(size ? size.w : b.w, 48), h = Math.max(size ? size.h : b.h, 42);
+  const cy = b.y + b.h/2;
+  const rawX = (part.anchor === 'right') ? (b.x + b.w - w) : (b.x + b.w/2 - w/2);
+  const x = Math.min(Math.max(rawX, 2), 778 - w);   // 図の枠からはみ出さないように
+  const y = Math.min(Math.max(cy - h/2, 2), 370 - h);
+  const tap = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8"`;
+  return revealed.has(key)
+    ? `<g class="hit" data-k="${key}">${tap} fill="transparent" pointer-events="all"/>${part.svg}</g>`
+    : `<g class="hit" data-k="${key}">${tap} fill="#CFE0F1" stroke="#3C7CB5" stroke-width="2.5"/></g>`;
+}
+
+/* 帯の名前（長いときは折り返す） */
+function labelPart(name, yc){
+  const lines = wrap(name, 8), L = lines.length;
+  let g = '';
+  lines.forEach((t,i)=> g += `<text x="182" y="${yc + 12 + i*26 - (L-1)*13}" text-anchor="end" font-size="21" fill="#1F3A5F">${esc(t)}</text>`);
+  const w = Math.max(...lines.map(tw))*21 + 10;
+  return {svg:g, anchor:'right', box:{x:182-w, y:yc + 12 - (L-1)*13 - 19, w, h:(L-1)*26 + 26}};
+}
 
 function drawFigure(){
   const {mode, ctx, n, base, comp} = Q;
-  const hide = document.getElementById('hideticks').checked && mode === 'times';
   const W = 780, H = 372;
   const x0 = 196, x1 = 688, uw = (x1 - x0) / n;
   const yT = 100, yB = 226, bh = 42, yL = 306;
-  const showTop  = (mode === 'compare' && !solved) ? '□' : String(comp);
-  const showBase = (mode === 'base'    && !solved) ? '□' : String(base);
-  const showN    = (mode === 'times'   && !solved) ? '□' : String(n);
   const unknownTop  = (mode === 'compare' && !solved);
   const unknownBase = (mode === 'base'    && !solved);
   const unknownN    = (mode === 'times'   && !solved);
   const u = ctx.unit;
   let s = '';
 
-  const labB = wrap(ctx.b, 8), labA = wrap(ctx.a, 8);
-  labB.forEach((t,i)=> s += `<text x="182" y="${yT + 12 + i*26 - (labB.length-1)*13}" text-anchor="end" font-size="21" fill="#1F3A5F">${esc(t)}</text>`);
-  labA.forEach((t,i)=> s += `<text x="182" y="${yB + 12 + i*26 - (labA.length-1)*13}" text-anchor="end" font-size="21" fill="#1F3A5F">${esc(t)}</text>`);
+  /* かくしたときに中身が推測できないよう、名前どうし・数値どうしは同じ大きさの枠にする */
+  const pTop  = labelPart(ctx.b, yT), pBase = labelPart(ctx.a, yB);
+  const labSize = {w:Math.max(pTop.box.w, pBase.box.w), h:Math.max(pTop.box.h, pBase.box.h)};
+  const vTop  = valueTag((x0+x1)/2, yT-bh/2-46, comp + u, unknownTop,  30, u);
+  const vBase = valueTag(x0+uw/2,   yB-bh/2-36, base + u, unknownBase, 28, u);
+  const valSize = {w:Math.max(vTop.box.w, vBase.box.w), h:Math.max(vTop.box.h, vBase.box.h)};
+
+  s += hid('labTop',  pTop,  labSize);
+  s += hid('labBase', pBase, labSize);
 
   s += `<rect x="${x0}" y="${yT-bh/2}" width="${x1-x0}" height="${bh}" fill="var(--bar-top)" stroke="var(--bar-top-edge)" stroke-width="2.5" rx="2"/>`;
   for (let i=1;i<n;i++){
-    if (hide) break;
     const x = x0 + uw*i;
     s += `<line x1="${x}" y1="${yT-bh/2}" x2="${x}" y2="${yT+bh/2}" stroke="var(--bar-top-edge)" stroke-width="1.6" stroke-dasharray="5 4"/>`;
   }
@@ -455,32 +488,46 @@ function drawFigure(){
   [x0, x0+uw, x1].forEach(x => s += `<line x1="${x}" y1="${yT-bh/2-6}" x2="${x}" y2="${yL-14}" stroke="#9FB3C8" stroke-width="1.4" stroke-dasharray="5 5"/>`);
 
   s += `<path d="M ${x0} ${yT-bh/2-14} Q ${(x0+x1)/2} ${yT-bh/2-52} ${x1} ${yT-bh/2-14}" fill="none" stroke="#7E93A8" stroke-width="1.8" stroke-dasharray="7 6"/>`;
-  s += valueTag((x0+x1)/2, yT-bh/2-46, showTop + (unknownTop?'':u), unknownTop, 30);
+  s += hid('valTop', vTop, valSize);
 
   s += `<path d="M ${x0} ${yB-bh/2-12} Q ${x0+uw/2} ${yB-bh/2-40} ${x0+uw} ${yB-bh/2-12}" fill="none" stroke="#7E93A8" stroke-width="1.8" stroke-dasharray="7 6"/>`;
-  s += valueTag(x0+uw/2, yB-bh/2-36, showBase + (unknownBase?'':u), unknownBase, 28);
+  s += hid('valBase', vBase, valSize);
 
   s += `<line x1="${x0-30}" y1="${yL}" x2="${x1+20}" y2="${yL}" stroke="var(--line)" stroke-width="4" stroke-linecap="round"/>`;
   for (let i=0;i<=n;i++){
-    if (hide && i!==0 && i!==1 && i!==n) continue;
     const x = x0 + uw*i;
     s += `<line x1="${x}" y1="${yL-11}" x2="${x}" y2="${yL+11}" stroke="var(--line)" stroke-width="3.4"/>`;
   }
   s += `<text x="${x0}" y="${yL+42}" text-anchor="middle" font-size="27" font-weight="800" fill="#1F3A5F">0</text>`;
   s += `<text x="${x0+uw}" y="${yL+42}" text-anchor="middle" font-size="27" font-weight="800" fill="#1F3A5F">1</text>`;
-  s += valueTag(x1, yL+34, showN, unknownN, 28);
+  s += hid('valN', valueTag(x1, yL+34, String(n), unknownN, 28));
   s += `<text x="${x1+26}" y="${yL+42}" text-anchor="start" font-size="26" font-weight="700" fill="#1F3A5F">倍</text>`;
 
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="線分図">${s}</svg>`;
 }
 
-function valueTag(cx, cy, text, unknown, size){
+/* いま□になっている場所 */
+function unknownKey(){
+  return Q.mode === 'compare' ? 'valTop' : Q.mode === 'base' ? 'valBase' : 'valN';
+}
+function paintFig(){ document.getElementById('figure').innerHTML = drawFigure(); }
+
+function valueTag(cx, cy, text, unknown, size, unit){
   if (unknown){
-    return `<g class="unknown-box"><rect x="${cx-20}" y="${cy-24}" width="40" height="40" rx="5" fill="#fff" stroke="#D0347A" stroke-width="3"/></g>`;
+    const bw = 40, uw = unit ? tw(unit)*size : 0;
+    const total = bw + (unit ? 5 + uw : 0);
+    const x = cx - total/2;
+    let g = `<rect x="${x}" y="${cy-24}" width="${bw}" height="40" rx="5" fill="#fff" stroke="var(--line)" stroke-width="3"/>`;
+    if (unit) g += `<text x="${x+bw+5}" y="${cy}" font-size="${size}" font-weight="800" fill="#1F3A5F">${esc(unit)}</text>`;
+    return {svg:`<g>${g}</g>`, box:{x:x-5, y:cy-29, w:total+10, h:50}};
   }
-  const w = text.length * size * 0.62 + 14;
-  return `<g><rect x="${cx-w/2}" y="${cy-size-4}" width="${w}" height="${size+12}" rx="7" fill="#fff" opacity=".92"/>`
-       + `<text x="${cx}" y="${cy}" text-anchor="middle" font-size="${size}" font-weight="800" fill="#1F3A5F">${esc(text)}</text></g>`;
+  text = String(text);
+  const w = tw(text)*size + 14;
+  return {
+    svg: `<g><rect x="${cx-w/2}" y="${cy-size-4}" width="${w}" height="${size+12}" rx="7" fill="#fff" opacity=".92"/>`
+       + `<text x="${cx}" y="${cy}" text-anchor="middle" font-size="${size}" font-weight="800" fill="#1F3A5F">${esc(text)}</text></g>`,
+    box: {x:cx-w/2, y:cy-size-4, w, h:size+12}
+  };
 }
 
 /* ============================================================
@@ -589,6 +636,7 @@ function check(){
   allCount++;
   if (correct){
     okCount++; solved = true;
+    revealed.add(unknownKey());      /* 正解したら図の□も見えるようにする */
     showStamp('maru');
     fb.className = 'ok';
     fb.innerHTML = orderSwapped
@@ -691,6 +739,7 @@ function checkBox(){
   allCount++;
   if (t.op === '÷' && t.A.num === e.x && t.B.num === e.y){
     okCount++; solved = true;
+    revealed.add(unknownKey());
     showStamp('maru');
     fb.className = 'ok';
     fb.innerHTML = `◎ せいかい！　□にあてはまる数は<b>${e.ans}</b>だね。`;
@@ -744,7 +793,7 @@ function render(){
   document.getElementById('cap').textContent = 'もんだい ／ ' + MODES[modeKey].name;
   document.getElementById('question').innerHTML =
     Q.text.replace(/(\d+)(m|cm|L|回|円|g|ページ|倍)/g, '<span class="num">$1$2</span>');
-  document.getElementById('figure').innerHTML = drawFigure();
+  paintFig();
 
   const d   = document.getElementById('display');
   const bar = document.getElementById('boxbar');
@@ -981,9 +1030,18 @@ function syncOpt(id){
   const inp = document.getElementById(id);
   inp.parentElement.classList.toggle('on', inp.checked);
 }
-document.getElementById('hideticks').addEventListener('change', ()=>{
-  syncOpt('hideticks');
-  if (tab !== 'versus') document.getElementById('figure').innerHTML = drawFigure();
+document.getElementById('hidefig').addEventListener('change', ()=>{
+  syncOpt('hidefig');
+  revealed.clear();
+  if (tab !== 'versus') paintFig();
+});
+document.getElementById('figure').addEventListener('click', ev=>{
+  if (!hideOn() || tab === 'versus') return;
+  const g = ev.target.closest && ev.target.closest('[data-k]');
+  if (!g) return;
+  const k = g.getAttribute('data-k');
+  if (revealed.has(k)) revealed.delete(k); else revealed.add(k);
+  paintFig();
 });
 document.getElementById('usebox').addEventListener('change', ev=>{
   useBox = ev.target.checked;
@@ -1006,7 +1064,7 @@ document.addEventListener('keydown', e=>{
 });
 
 useBox = document.getElementById('usebox').checked;   // 再読み込み時のずれ防止
-syncOpt('usebox'); syncOpt('hideticks');
+syncOpt('usebox'); syncOpt('hidefig');
 makeQuestion();
 </script>
 </body>
