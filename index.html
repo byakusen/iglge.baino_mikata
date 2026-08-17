@@ -209,6 +209,35 @@
     .card{padding:10px 12px}
     #question{font-size:clamp(16px,2.6vh,22px);line-height:1.65}
   }
+  /* ---------- 10問チャレンジ（challenge10.js の見た目を上書き） ---------- */
+  header #chal-wrap{flex:none;gap:8px}
+  header .chal-btn{
+    font-family:var(--font);font-size:clamp(11px,1.6vh,14px);font-weight:700;
+    padding:5px 13px;border-radius:999px;white-space:nowrap;
+  }
+  header #chal-bar{
+    gap:8px;padding:4px 13px;border-radius:999px;
+    border:2px solid #E0C6EC;background:#fff;box-shadow:none;
+    font-size:clamp(11px,1.5vh,14px);
+  }
+  header #chal-dots{font-size:clamp(12px,1.8vh,16px);letter-spacing:1px}
+  .chal-card{font-family:var(--font)}
+  /* チャレンジ中は、ヘッダーの席をあけるためにわきの表示を消す */
+  body.chal-on .sub,
+  body.chal-on .reset{display:none}
+  @media (max-width:1000px){ header #chal-count{display:none} }
+  @media (max-width:820px){
+    header .chal-btn{font-size:12px;padding:4px 10px}
+    body.chal-on .score{display:none}
+  }
+  /* スマホの幅：ヘッダーが切れないように、まわりも少しつめる */
+  @media (max-width:560px){
+    header{gap:6px}
+    .score{padding:3px 9px}
+    .reset{padding:4px 8px;font-size:11px}
+    header .chal-btn{padding:4px 8px}
+  }
+
   /* ---------- 画面がとても低いとき ---------- */
   @media (max-height:430px){
     body{overflow:auto}
@@ -221,6 +250,7 @@
   <header>
     <h1>倍の見方</h1>
     <span class="sub">線分図を見て、式をつくろう</span>
+    <div id="chal-mount"></div>
     <span class="score">せいかい <b id="sc-ok">0</b> / <span id="sc-all">0</span> もん</span>
     <button class="reset" id="btn-reset">リセット</button>
   </header>
@@ -323,6 +353,267 @@
 
 <script>
 /* ============================================================
+   challenge10.js  —  「10問チャレンジ」だけを取り出したもの
+   ------------------------------------------------------------
+   もと：warizan81_kangae.html（小数のかけ算とわり算の筆算）⑪81
+   どんなアプリでも使えるように、CSS と HTML も中に入れてあります。
+   ほかのファイルは いりません（ライブラリなし・ネットもいらない）。
+
+   ■ 使いかた（3つ呼ぶだけ）
+     1. Challenge10.init({ mount: '#どこか', next: () => 次の問題を出す関数() })
+     2. 1問できたら          Challenge10.done()
+     3. まちがえたら          Challenge10.miss()
+
+   ■ そのほか
+     Challenge10.newProblem()  … 新しい問題を出したとき（その問題のミス数を0に）
+     Challenge10.reset()       … 数えなおす（タブを変えたときなど）
+     Challenge10.isOn()        … いまチャレンジ中か
+     Challenge10.stop()        … チャレンジをやめる
+     Challenge10.state         … {on, total, no, miss, missNow, perfect, t0}
+
+   ■ init に わたせるもの（ぜんぶ省略できます）
+     mount       ボタンを置く場所。'#id' か 要素。省略すると <body> の先頭
+     total       何問にするか（初期値 10）
+     next        次の問題を出す関数。これがないと自動で次に進みません
+     nextDelay   はなまるから次の問題までの待ち時間 ms（初期値 1800）
+     resultDelay 最後の問題から成せき表までの待ち時間 ms（初期値 1500）
+     label       ボタンの文字（初期値 '🏁 10問チャレンジ'）
+     sound       ボタンを押したとき鳴らす関数（例: () => playSound('click')）
+     onToggle    on/off が変わったとき呼ばれる関数 (on) => {}
+     onFinish    10問おわったとき呼ばれる関数 (成せき) => {}
+     record      true にすると、その日の最高記録を localStorage に残す
+     recordKey   記録の名前（アプリごとに変える。初期値 'challenge10'）
+     css         false にすると 見た目のCSSを入れない（自分で書くとき）
+   ============================================================ */
+(function (global) {
+    'use strict';
+
+    var CSS = `
+    .chal-btn {
+        font-size: 1rem; font-weight: bold; color: #6a1b9a;
+        background: #f3e5f5; border: 2px solid #ce93d8; border-radius: 20px;
+        padding: 7px 16px; box-shadow: 0 2px 0 #ce93d8; cursor: pointer;
+        font-family: inherit;
+    }
+    .chal-btn.on { color: #fff; background: #8e24aa; border-color: #6a1b9a; box-shadow: 0 2px 0 #4a148c; }
+    .chal-btn:focus-visible, .chal-btns button:focus-visible { outline: 3px solid #8e24aa; outline-offset: 2px; }
+    #chal-bar {
+        display: none; align-items: center; gap: 10px;
+        background: rgba(255,255,255,0.9); border-radius: 20px; padding: 6px 16px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        font-weight: bold; color: #6a1b9a; white-space: nowrap;
+    }
+    #chal-dots { color: #8e24aa; letter-spacing: 2px; font-size: 1.05rem; }
+    #chal-wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    /* おわったときの成せき表 */
+    #chal-result {
+        display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.45); z-index: 900;
+        align-items: center; justify-content: center;
+    }
+    #chal-result.show { display: flex; }
+    .chal-card {
+        background: #fff; border-radius: 20px; padding: 28px 34px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3); text-align: center; max-width: 90vw;
+    }
+    .chal-title { font-size: 1.8rem; font-weight: bold; color: #8e24aa; margin-bottom: 14px; }
+    .chal-lines { font-size: 1.25rem; font-weight: bold; color: #333; line-height: 2; }
+    .chal-lines b { color: #e53935; font-size: 1.5rem; }
+    .chal-msg { margin-top: 10px; color: #ff6f00; }
+    .chal-best { margin-top: 6px; font-size: 1rem; color: #6a1b9a; }
+    .chal-btns { display: flex; gap: 12px; justify-content: center; margin-top: 20px; }
+    .chal-btns button {
+        padding: 12px 20px; font-size: 1.1rem; font-weight: bold; font-family: inherit;
+        border-radius: 14px; cursor: pointer; border: none;
+    }
+    #btn-chal-again { color: #fff; background: #8e24aa; box-shadow: 0 3px 0 #4a148c; }
+    #btn-chal-quit  { color: #6a1b9a; background: #f3e5f5; border: 2px solid #ce93d8; }
+    @media (prefers-reduced-motion: reduce) { .chal-btn, .chal-btns button { transition: none; } }
+    `;
+
+    var BAR_HTML =
+        '<button id="btn-challenge" class="chal-btn" type="button"></button>' +
+        '<div id="chal-bar"><span id="chal-dots"></span><span id="chal-count"></span></div>';
+
+    var RESULT_HTML =
+        '<div class="chal-card">' +
+        '  <div class="chal-title">🏁 <span id="chal-total-title"></span>問 できました！</div>' +
+        '  <div class="chal-lines" id="chal-lines"></div>' +
+        '  <div class="chal-btns">' +
+        '    <button id="btn-chal-again" type="button">もう一度チャレンジ</button>' +
+        '    <button id="btn-chal-quit" type="button">やめる</button>' +
+        '  </div>' +
+        '</div>';
+
+    var cfg = null;
+    var chal = { on: false, total: 10, no: 0, miss: 0, missNow: 0, perfect: 0, t0: 0 };
+    var $ = function (id) { return document.getElementById(id); };
+
+    // --- きょうの記録（localStorage。使えないときは だまって何もしない）---
+    function todayKey() {
+        var d = new Date();
+        return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    }
+    function loadBest() {
+        if (!cfg.record) return null;
+        try {
+            var raw = localStorage.getItem(cfg.recordKey);
+            if (!raw) return null;
+            var o = JSON.parse(raw);
+            // その日の記録だけ／問題数がちがう記録はまぜない
+            return (o && o.day === todayKey() && o.total === chal.total) ? o : null;
+        } catch (e) { return null; }
+    }
+    function saveBest(perfect, sec) {
+        if (!cfg.record) return null;
+        var best = loadBest();
+        // ノーミスの数が多いほうが上。同じなら 時間が短いほう
+        if (best && (best.perfect > perfect || (best.perfect === perfect && best.sec <= sec))) return best;
+        var o = { day: todayKey(), perfect: perfect, sec: sec, total: chal.total };
+        try { localStorage.setItem(cfg.recordKey, JSON.stringify(o)); } catch (e) { }
+        return o;
+    }
+
+    // --- 帯（○○○●…）の書きかえ ---
+    function chalUpdateBar() {
+        $('btn-challenge').classList.toggle('on', chal.on);
+        $('chal-bar').style.display = chal.on ? 'flex' : 'none';
+        if (!chal.on) return;
+        var dots = '';
+        for (var i = 0; i < chal.total; i++) dots += (i < chal.no) ? '●' : '○';
+        $('chal-dots').innerText = dots;
+        $('chal-count').innerText = Math.min(chal.no + 1, chal.total) + '問め / ' + chal.total;
+    }
+
+    // --- はじめから数えなおす ---
+    function chalReset() {
+        chal.no = 0; chal.miss = 0; chal.missNow = 0; chal.perfect = 0; chal.t0 = Date.now();
+        $('chal-result').classList.remove('show');
+        chalUpdateBar();
+    }
+
+    // --- 1問おわったときに呼ぶ ---
+    function chalDone() {
+        if (!chal.on) return;
+        if (chal.missNow === 0) chal.perfect++;
+        chal.no++;
+        chalUpdateBar();
+        if (chal.no < chal.total) {
+            setTimeout(function () {         // つぎの問題へ
+                if (!chal.on) return;
+                chal.missNow = 0;
+                if (cfg.next) cfg.next();
+            }, cfg.nextDelay);
+            return;
+        }
+        var sec = Math.floor((Date.now() - chal.t0) / 1000);
+        var msg = (chal.perfect === chal.total) ? 'ぜんぶノーミス！ すばらしい！'
+                : (chal.perfect >= chal.total - 2) ? 'よくがんばりました！'
+                : 'つぎは もっとできる！';
+        var best = saveBest(chal.perfect, sec);
+        var result = { perfect: chal.perfect, miss: chal.miss, sec: sec, total: chal.total };
+        setTimeout(function () {
+            $('chal-total-title').innerText = chal.total;
+            $('chal-lines').innerHTML =
+                '<div>ノーミスでできた問題　<b>' + chal.perfect + '</b> / ' + chal.total + '</div>' +
+                '<div>まちがえた回数　<b>' + chal.miss + '</b> 回</div>' +
+                '<div>かかった時間　<b>' + Math.floor(sec / 60) + '</b> 分 <b>' + (sec % 60) + '</b> 秒</div>' +
+                '<div class="chal-msg">' + msg + '</div>' +
+                (best ? '<div class="chal-best">きょうの最高記録　ノーミス ' + best.perfect + ' / ' + best.total +
+                        ' 問　　' + Math.floor(best.sec / 60) + '分' + (best.sec % 60) + '秒</div>' : '');
+            $('chal-result').classList.add('show');
+            $('btn-chal-again').focus();
+            if (cfg.onFinish) cfg.onFinish(result);
+        }, cfg.resultDelay);
+    }
+
+    // --- はじめの用意 ---
+    function init(opt) {
+        opt = opt || {};
+        cfg = {
+            total: opt.total || 10,
+            next: opt.next || null,
+            nextDelay: (opt.nextDelay === undefined) ? 1800 : opt.nextDelay,
+            resultDelay: (opt.resultDelay === undefined) ? 1500 : opt.resultDelay,
+            label: opt.label || '🏁 10問チャレンジ',
+            sound: opt.sound || null,
+            onToggle: opt.onToggle || null,
+            onFinish: opt.onFinish || null,
+            record: !!opt.record,
+            recordKey: opt.recordKey || 'challenge10',
+            css: (opt.css === undefined) ? true : opt.css
+        };
+        chal.total = cfg.total;
+        if (opt.label === undefined && cfg.total !== 10) cfg.label = '🏁 ' + cfg.total + '問チャレンジ';
+
+        // CSS
+        if (cfg.css && !$('chal-style')) {
+            var st = document.createElement('style');
+            st.id = 'chal-style';
+            st.textContent = CSS;
+            document.head.appendChild(st);
+        }
+        // ボタンと帯
+        var host = (typeof opt.mount === 'string') ? document.querySelector(opt.mount) : opt.mount;
+        var wrap = $('chal-wrap');
+        if (!wrap) {
+            wrap = document.createElement('div');
+            wrap.id = 'chal-wrap';
+            wrap.innerHTML = BAR_HTML;
+            if (host) host.appendChild(wrap);
+            else document.body.insertBefore(wrap, document.body.firstChild);
+        }
+        // 成せき表
+        if (!$('chal-result')) {
+            var res = document.createElement('div');
+            res.id = 'chal-result';
+            res.innerHTML = RESULT_HTML;
+            document.body.appendChild(res);
+        }
+        $('btn-challenge').innerText = cfg.label;
+
+        $('btn-challenge').addEventListener('click', function () {
+            chal.on = !chal.on;
+            if (cfg.sound) cfg.sound();
+            chalReset();
+            if (cfg.onToggle) cfg.onToggle(chal.on);
+            if (cfg.next) cfg.next();
+        });
+        $('btn-chal-again').addEventListener('click', function () {
+            chalReset();
+            if (cfg.next) cfg.next();
+        });
+        $('btn-chal-quit').addEventListener('click', function () {
+            chal.on = false;
+            chalReset();
+            if (cfg.onToggle) cfg.onToggle(false);
+            if (cfg.next) cfg.next();
+        });
+
+        chalUpdateBar();
+        return API;
+    }
+
+    var API = {
+        init: init,
+        done: chalDone,                                        // 1問できた
+        miss: function () { if (chal.on) { chal.miss++; chal.missNow++; } },  // まちがえた
+        newProblem: function () { chal.missNow = 0; },          // 新しい問題を出した
+        reset: chalReset,                                       // 数えなおす
+        stop: function () { chal.on = false; chalReset(); },    // やめる
+        isOn: function () { return chal.on; },
+        updateBar: chalUpdateBar,
+        setTotal: function (n) { chal.total = cfg.total = n; chalReset(); },
+        state: chal
+    };
+
+    global.Challenge10 = API;
+    if (typeof module !== 'undefined' && module.exports) module.exports = API;
+})(typeof window !== 'undefined' ? window : this);
+</script>
+
+<script>
+/* ============================================================
    もんだいのざいりょう
    ============================================================ */
 const CONTEXTS = [
@@ -374,6 +665,28 @@ let okCount = 0, allCount = 0;
 let useBox  = false;
 let boxStep = 1;              // ① □の式をつくる  ② □をわり算でもとめる
 let revealed = new Set();     // 「図の表示をかくす」で、クリックして出した部品
+/* 10問チャレンジ：1つのもんだいで done() を2回呼ばないようにする見はり役
+   （□の式は2ステップ、くらべるは3ステップあるので、最後の1回だけ数える） */
+let chalCounted = false;
+function chalDoneOnce(){
+  if (chalCounted) return;
+  chalCounted = true;
+  Challenge10.done();
+}
+/* くらべるタブは1もんだい＝3ステップなので5問にする */
+function chalTotalFor(t){ return t === 'versus' ? 5 : 10; }
+/* せまい画面ではボタンの文字を短く（ヘッダーが切れないように） */
+function chalLabel(n){ return '🏁 ' + n + '問' + (window.innerWidth < 700 ? '' : 'チャレンジ'); }
+function syncChalTotal(){
+  const n = chalTotalFor(tab);
+  if (Challenge10.state.total !== n){
+    Challenge10.setTotal(n);                                   /* 中で reset もされる */
+    document.getElementById('btn-challenge').innerText = chalLabel(n);
+  } else {
+    Challenge10.reset();                                       /* タブを変えたら数えなおす */
+  }
+}
+
 function boxTabOK(){
   const m = (tab === 'random') ? (Q && Q.mode) : tab;
   return m === 'times' || m === 'base';
@@ -384,6 +697,8 @@ function boxOn(){ return useBox && boxTabOK(); }
    もんだいをつくる
    ============================================================ */
 function makeQuestion(){
+  Challenge10.newProblem();          /* この問題のミス数を0に */
+  chalCounted = false;
   if (tab === 'versus'){ makeVs(); return; }
   const mode = (tab === 'random') ? pick(['times','compare','base']) : tab;
   const ctx  = pick(CONTEXTS);
@@ -638,6 +953,7 @@ function check(){
     okCount++; solved = true;
     revealed.add(unknownKey());      /* 正解したら図の□も見えるようにする */
     showStamp('maru');
+    chalDoneOnce();
     fb.className = 'ok';
     fb.innerHTML = orderSwapped
       ? '◎ せいかい！　ただし式は<b>（もとにする数）×（何倍）</b>の順で書くと意味がはっきりするよ。'
@@ -648,6 +964,7 @@ function check(){
     if (!tokens.some(t=>t.t==='eq')) tokens.push({t:'eq'}, {t:'num', v:String(p.result)});
   } else {
     showStamp('batsu');
+    Challenge10.miss();
     fb.className = 'ng';
     fb.innerHTML = '△ もういちど。' + diagnose(p, e);
   }
@@ -723,6 +1040,7 @@ function checkBox(){
       return;
     }
     showStamp('batsu');
+    Challenge10.miss();
     fb.className = 'ng';
     fb.innerHTML = '△ もういちど。' + diagnoseBox(t, boxFirst);
     updateScore();
@@ -741,6 +1059,7 @@ function checkBox(){
     okCount++; solved = true;
     revealed.add(unknownKey());
     showStamp('maru');
+    chalDoneOnce();
     fb.className = 'ok';
     fb.innerHTML = `◎ せいかい！　□にあてはまる数は<b>${e.ans}</b>だね。`;
     if (!tokens.some(x => x.t === 'eq')) tokens.push({t:'eq'}, {t:'num', v:String(e.ans)});
@@ -751,6 +1070,7 @@ function checkBox(){
     return;
   }
   showStamp('batsu');
+  Challenge10.miss();
   fb.className = 'ng';
   fb.innerHTML = '△ もういちど。' + diagnose({x:t.A.num, op:t.op, y:t.B.num}, e);
   updateScore();
@@ -979,6 +1299,7 @@ function checkVs(){
     return;
   }
   showStamp('batsu');
+  Challenge10.miss();
   fb.className = 'ng';
   fb.innerHTML = '△ もういちど。' + diagnose(p, {op:'÷', x:o.after, y:o.base});
   updateScore();
@@ -993,6 +1314,7 @@ function pickSide(k){
   if (k === win){
     okCount++; V.done3 = true;
     showStamp('maru');
+    chalDoneOnce();                 /* ここで「1もんだい」おわり */
     fb.className = 'ok';
     fb.innerHTML = `◎ せいかい！　${esc(V.c.a)}は${V.A.n}倍、${esc(V.c.b)}は${V.B.n}倍。`
                  + `倍でくらべると${esc(win==='A'?V.c.a:V.c.b)}のほうが${esc(V.c.verb)}ね。`;
@@ -1000,6 +1322,7 @@ function pickSide(k){
     a.textContent = (win==='A' ? V.c.a : V.c.b);
   } else {
     showStamp('batsu');
+    Challenge10.miss();
     fb.className = 'ng';
     fb.innerHTML = '△ もういちど。のびた長さではなく、<b>何倍になったか</b>でくらべよう。';
   }
@@ -1015,17 +1338,23 @@ document.querySelectorAll('.tab').forEach(btn=>{
     btn.setAttribute('aria-selected','true');
     tab = btn.dataset.mode;
     document.getElementById('feedback').textContent = '';
+    syncChalTotal();                 /* タブを変えたらチャレンジは数えなおし */
     makeQuestion();
   });
 });
-document.querySelectorAll('.key').forEach(k=>k.addEventListener('click', ()=>press(k.dataset.k)));
-document.getElementById('btn-check').addEventListener('click', check);
-document.getElementById('btn-next').addEventListener('click', ()=>{
+/* 次のもんだいへ（ボタンからも、10問チャレンジからも ここを通る） */
+function nextQuestion(){
   const fb = document.getElementById('feedback');
   fb.textContent = ''; fb.className = '';
   makeQuestion();
+}
+document.querySelectorAll('.key').forEach(k=>k.addEventListener('click', ()=>press(k.dataset.k)));
+document.getElementById('btn-check').addEventListener('click', check);
+document.getElementById('btn-next').addEventListener('click', nextQuestion);
+document.getElementById('btn-reset').addEventListener('click', ()=>{
+  okCount = 0; allCount = 0; updateScore();
+  Challenge10.reset();
 });
-document.getElementById('btn-reset').addEventListener('click', ()=>{ okCount = 0; allCount = 0; updateScore(); });
 function syncOpt(id){
   const inp = document.getElementById(id);
   inp.parentElement.classList.toggle('on', inp.checked);
@@ -1065,6 +1394,24 @@ document.addEventListener('keydown', e=>{
 
 useBox = document.getElementById('usebox').checked;   // 再読み込み時のずれ防止
 syncOpt('usebox'); syncOpt('hidefig');
+
+/* ============================================================
+   10問チャレンジ（challenge10.js）
+   ============================================================ */
+Challenge10.init({
+  mount: '#chal-mount',
+  total: 10,                 // くらべるタブに入ると自動で5問になる
+  label: chalLabel(10),
+  next: nextQuestion,
+  nextDelay: 1800,           // はなまるを見せてから次の問題へ
+  record: false,             // true にすると「きょうの最高記録」を残す（共用PCでは注意）
+  recordKey: 'bai-no-mikata',
+  onToggle: on => {
+    document.body.classList.toggle('chal-on', on);   // せまい画面で席をあける
+    if (on){ okCount = 0; allCount = 0; updateScore(); }
+  }
+});
+
 makeQuestion();
 </script>
 </body>
