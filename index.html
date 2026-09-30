@@ -623,7 +623,7 @@ const CONTEXTS = [
     pred:v=>`長さが${v}cmです`, ask:'長さは何cmですか。' },
   { a:'ミニトマト', b:'ひまわり', attr:'高さ', unit:'cm', scale:1,
     pred:v=>`高さが${v}cmです`, ask:'高さは何cmですか。' },
-  { a:'ゆいさんが読んだ本', b:'お姉さんが読んだ本', attr:'ページ数', unit:'ページ', scale:1,
+  { a:'ゆいさん', b:'お姉さん', attr:'読んだページ数', unit:'ページ', scale:1,
     pred:v=>`${v}ページ読みました`, ask:'何ページ読みましたか。' },
   { a:'水とう', b:'やかん', attr:'かさ', unit:'L', scale:1,
     pred:v=>`水が${v}L入ります`, ask:'水が何L入りますか。' },
@@ -674,7 +674,7 @@ let tokens = [];
 let solved = false;
 let okCount = 0, allCount = 0;
 
-/* □をつかった式モード（何倍・元にする数のもんだいだけ。ランダムの中でも切りかわる） */
+/* □をつかった式モード（元にする数のもんだいだけ。ランダムの中でも切りかわる） */
 let useBox  = false;
 let boxStep = 1;              // ① □の式をつくる  ② □をわり算でもとめる
 let revealed = new Set();     // 「図の表示をかくす」で、クリックして出した部品
@@ -726,6 +726,7 @@ function applyTestUI(m){
   const want = testing ? { box: !!md.box, hide: !!md.hide }
                        : (uiBase || { box: cb.checked, hide: ch.checked });
   if (!testing) uiBase = null;
+  if (tab !== 'versus' && Q && Q.mode === 'base') want.box = true;   /* 元にする数はいつも□の式から */
   [[cb, want.box], [ch, want.hide]].forEach(pair => {
     if (pair[0].checked !== pair[1]){ pair[0].checked = pair[1]; pair[0].dispatchEvent(new Event('change')); }
   });
@@ -733,7 +734,7 @@ function applyTestUI(m){
 
 function boxTabOK(){
   const m = (tab === 'random') ? (Q && Q.mode) : tab;
-  return m === 'times' || m === 'base';
+  return m === 'base';                      /* □をつかった式は「元にする数」だけ */
 }
 function boxOn(){ return useBox && boxTabOK(); }
 
@@ -746,6 +747,13 @@ function makeQuestion(){
   qSerial++;                         /* 前の問題のタイマーを効かなくする */
   if (tab === 'versus'){ makeVs(); return; }
   const mode = (tab === 'random') ? pick(['times','compare','base']) : tab;
+  /* 「元にする数」の問題は、毎回かならず「□をつかった式」にチェックが入った状態で始める
+     （□なしでとく子は、1問ごとに自分でチェックをはずす） */
+  if (mode === 'base'){
+    document.getElementById('usebox').checked = true;
+    useBox = true;
+    syncOpt('usebox');
+  }
   const ctx  = pick(CONTEXTS);
   const n    = 2 + rnd(8);
   let k;
@@ -1472,7 +1480,7 @@ window.TEST_SETTEI = {
       { no:'大問4', mode:'versus',  name:'どちらが よくのびる' } ] },
 
     { title:'□を つかった 式の テスト', items:[
-      { no:'大問1', mode:'times', set:{box:true}, name:'何倍（□の式）' },
+      { no:'大問1', mode:'times',   name:'何倍' },
       { no:'大問2', mode:'base',  set:{box:true}, name:'元にする数（□の式）' },
       { no:'大問3', mode:'compare', name:'比べる数' },
       { no:'大問4', mode:'versus',  name:'どちらが よくのびる' } ] },
