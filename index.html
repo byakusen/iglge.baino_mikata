@@ -708,6 +708,7 @@ function setMode(m){
   document.querySelectorAll('.tab').forEach(b =>
     b.setAttribute('aria-selected', b.dataset.mode === m ? 'true' : 'false'));
   tab = m; mode = m;
+  randomBag = []; lastRandomMode = null;     /* タブを開きなおしたら、ランダムの組も作りなおす */
   const fb = document.getElementById('feedback');
   fb.textContent = ''; fb.className = '';
   syncChalTotal();
@@ -741,12 +742,32 @@ function boxOn(){ return useBox && boxTabOK(); }
 /* ============================================================
    もんだいをつくる
    ============================================================ */
+/* ランダムの出し方：
+   3つ（何倍・比べる数・元にする数）を1組にして順番をまぜ、1組ずつ出していく。
+   → 3問ごとに3種類が1回ずつ出るので、出る回数がそろう。
+   組と組のつなぎ目で同じ種類が続かないようにもしてある。 */
+let randomBag = [];
+let lastRandomMode = null;
+function nextRandomMode(){
+  if (randomBag.length === 0){
+    do {
+      randomBag = ['times','compare','base'];
+      for (let i = randomBag.length - 1; i > 0; i--){
+        const j = rnd(i + 1);
+        [randomBag[i], randomBag[j]] = [randomBag[j], randomBag[i]];
+      }
+    } while (randomBag[0] === lastRandomMode);
+  }
+  lastRandomMode = randomBag.shift();
+  return lastRandomMode;
+}
+
 function makeQuestion(){
   Challenge10.newProblem();          /* この問題のミス数を0に */
   chalCounted = false;
   qSerial++;                         /* 前の問題のタイマーを効かなくする */
   if (tab === 'versus'){ makeVs(); return; }
-  const mode = (tab === 'random') ? pick(['times','compare','base']) : tab;
+  const mode = (tab === 'random') ? nextRandomMode() : tab;
   /* 「元にする数」の問題は、毎回かならず「□をつかった式」にチェックが入った状態で始める
      （□なしでとく子は、1問ごとに自分でチェックをはずす） */
   if (mode === 'base'){
