@@ -708,7 +708,7 @@ function setMode(m){
   document.querySelectorAll('.tab').forEach(b =>
     b.setAttribute('aria-selected', b.dataset.mode === m ? 'true' : 'false'));
   tab = m; mode = m;
-  randomBag = []; lastRandomMode = null;     /* タブを開きなおしたら、ランダムの組も作りなおす */
+  randomBag = [];                            /* タブを開きなおしたら、ランダムの組も作りなおす */
   const fb = document.getElementById('feedback');
   fb.textContent = ''; fb.className = '';
   syncChalTotal();
@@ -747,19 +747,18 @@ function boxOn(){ return useBox && boxTabOK(); }
    → 3問ごとに3種類が1回ずつ出るので、出る回数がそろう。
    組と組のつなぎ目で同じ種類が続かないようにもしてある。 */
 let randomBag = [];
-let lastRandomMode = null;
 function nextRandomMode(){
-  if (randomBag.length === 0){
+  const prev = Q ? Q.mode : null;          // 1つ前に出した問題の種類
+  if (randomBag.length === 0 || randomBag[0] === prev){
     do {
       randomBag = ['times','compare','base'];
       for (let i = randomBag.length - 1; i > 0; i--){
         const j = rnd(i + 1);
         [randomBag[i], randomBag[j]] = [randomBag[j], randomBag[i]];
       }
-    } while (randomBag[0] === lastRandomMode);
+    } while (randomBag[0] === prev);       // 前と同じ種類からは始めない
   }
-  lastRandomMode = randomBag.shift();
-  return lastRandomMode;
+  return randomBag.shift();
 }
 
 function makeQuestion(){
